@@ -1,110 +1,13 @@
 const Employee = require("../Model/Employee_schema");
-const { createEmployeeAccount } = require("./Auth");
+const auth_data = require("../Model/auth_schema");
 const bcrypt = require("bcrypt");
 const dotenv = require("dotenv");
 dotenv.config();
 
-// Create Employee with optional account
+// ========== CREATE EMPLOYEE ==========
 const postEmployeeAPI = async (req, res) => {
-  console.log("Received employee data:", req.body);
-  
-  const {
-    EmpId,
-    EmpName,
-    Gender,
-    DOB,
-    Email,
-    ContactNumber,
-    EmpDepartment,
-    Salary,
-    JoiningDate,
-    Designation,
-    hasAccount,
-    accountData
-  } = req.body;
-
-  try {
-    // Validate required fields
-    const requiredFields = ['EmpId', 'EmpName', 'Gender', 'DOB', 'Email', 'ContactNumber', 'EmpDepartment', 'Salary', 'JoiningDate', 'Designation'];
-    const missingFields = requiredFields.filter(field => !req.body[field]);
-    
-    if (missingFields.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: `Missing required fields: ${missingFields.join(', ')}`
-      });
-    }
-
-    // Check for existing employee
-    const existingEmployee = await Employee.findOne({
-      $or: [{ EmpId }, { Email: Email.toLowerCase() }],
-    });
-
-    if (existingEmployee) {
-      return res.status(409).json({
-        success: false,
-        message: "Employee with this ID or Email already exists",
-      });
-    }
-
-    // Prepare employee data
-    const employeeData = {
-      EmpId,
-      EmpName,
-      Gender,
-      DOB,
-      Email: Email.toLowerCase(),
-      ContactNumber,
-      EmpDepartment,
-      Salary: Number(Salary),
-      JoiningDate,
-      Designation,
-      hasAccount: hasAccount || false,
-      empImage: null
-    };
-
-    // If account creation is requested
-    if (hasAccount && accountData) {
-      try {
-        // Create account using the auth service
-        const account = await createEmployeeAccount({
-          EmpName,
-          Email,
-          accountData,
-          EmpId
-        });
-        employeeData.accountId = account._id;
-      } catch (accountError) {
-        return res.status(409).json({
-          success: false,
-          message: accountError.message || "Failed to create account"
-        });
-      }
-    }
-
-    // Create employee
-    const newEmployee = await Employee.create(employeeData);
-
-    return res.status(201).json({
-      success: true,
-      message: hasAccount ? 'Employee and account created successfully' : 'Employee created successfully',
-      data: newEmployee
-    });
-
-  } catch (error) {
-    console.error("Error creating employee:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Something went wrong",
-      error: error.message
-    });
-  }
-};
-
-
-// Create Employee
-const postEmployeeAPI = async (req, res) => {
-  console.log("Received employee data:", req.body);
+  console.log("=== NEW EMPLOYEE CREATION REQUEST ===");
+  console.log("Request body:", JSON.stringify(req.body, null, 2));
 
   const {
     EmpId,
@@ -122,7 +25,7 @@ const postEmployeeAPI = async (req, res) => {
   } = req.body;
 
   try {
-    // Validate required fields (empImage is NOT required anymore)
+    // Validate required fields
     const requiredFields = [
       "EmpId",
       "EmpName",
@@ -169,7 +72,7 @@ const postEmployeeAPI = async (req, res) => {
       JoiningDate,
       Designation,
       hasAccount: hasAccount || false,
-      empImage: null, // Default image
+      empImage: null, // Default value
     };
 
     // If account creation is requested
@@ -218,7 +121,25 @@ const postEmployeeAPI = async (req, res) => {
       data: newEmployee,
     });
   } catch (error) {
-    console.error("Error creating employee:", error);
+    console.error("=== EMPLOYEE CREATION ERROR ===");
+    console.error("Error:", error);
+
+    // Handle specific Mongoose errors
+    if (error.name === "ValidationError") {
+      const errors = Object.values(error.errors).map((e) => e.message);
+      return res.status(400).json({
+        success: false,
+        message: "Validation error: " + errors.join(", "),
+      });
+    }
+
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: "Duplicate field: " + Object.keys(error.keyValue).join(", "),
+      });
+    }
+
     return res.status(500).json({
       success: false,
       message: "Something went wrong",
@@ -227,11 +148,10 @@ const postEmployeeAPI = async (req, res) => {
   }
 };
 
-// Get All Employees
+// ========== GET ALL EMPLOYEES ==========
 const getEmployeeAPI = async (req, res) => {
   try {
     const data = await Employee.find().sort({ createdAt: -1 });
-
     return res.status(200).json({
       success: true,
       message: "Employees fetched successfully",
@@ -246,7 +166,7 @@ const getEmployeeAPI = async (req, res) => {
   }
 };
 
-// Update Employee using Email (with image upload)
+// ========== UPDATE EMPLOYEE BY EMAIL ==========
 const updateEmployeeAPI = async (req, res) => {
   console.log("Update employee by email:", req.body);
 
@@ -273,7 +193,6 @@ const updateEmployeeAPI = async (req, res) => {
       });
     }
 
-    // Prepare update data
     const updateData = {
       EmpId,
       EmpName,
@@ -287,7 +206,6 @@ const updateEmployeeAPI = async (req, res) => {
       Designation,
     };
 
-    // If image is uploaded
     if (req.files?.empImage) {
       updateData.empImage = req.files.empImage[0].filename;
     }
@@ -307,10 +225,9 @@ const updateEmployeeAPI = async (req, res) => {
   }
 };
 
-// Update Employee by MongoDB _id
+// ========== UPDATE EMPLOYEE BY ID ==========
 const updateEmployeeAPIbyId = async (req, res) => {
   console.log("Updating employee with ID:", req.params.id);
-  console.log("Update data:", req.body);
 
   const { id } = req.params;
   const {
@@ -327,7 +244,6 @@ const updateEmployeeAPIbyId = async (req, res) => {
   } = req.body;
 
   try {
-    // Check if employee exists
     const existingEmployee = await Employee.findById(id);
     if (!existingEmployee) {
       return res.status(404).json({
@@ -336,7 +252,6 @@ const updateEmployeeAPIbyId = async (req, res) => {
       });
     }
 
-    // Update employee
     const updatedEmployee = await Employee.findByIdAndUpdate(
       id,
       {
@@ -369,7 +284,7 @@ const updateEmployeeAPIbyId = async (req, res) => {
   }
 };
 
-// Delete Employee
+// ========== DELETE EMPLOYEE ==========
 const deleteEmployeeAPI = async (req, res) => {
   try {
     const { id } = req.params;
@@ -383,7 +298,6 @@ const deleteEmployeeAPI = async (req, res) => {
       });
     }
 
-    // Also delete associated account if exists
     if (employee.accountId) {
       await auth_data.findByIdAndDelete(employee.accountId);
     }
@@ -401,7 +315,7 @@ const deleteEmployeeAPI = async (req, res) => {
   }
 };
 
-// Get Employee by ID
+// ========== GET EMPLOYEE BY ID ==========
 const getEmployeeById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -427,6 +341,7 @@ const getEmployeeById = async (req, res) => {
   }
 };
 
+// ========== EXPORT ==========
 module.exports = {
   postEmployeeAPI,
   getEmployeeAPI,
