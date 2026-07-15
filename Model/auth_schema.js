@@ -1,6 +1,6 @@
-let mongoose = require("mongoose");
+const mongoose = require("mongoose");
 
-let auth_schema = mongoose.Schema(
+const auth_schema = mongoose.Schema(
   {
     id: {
       type: String,
@@ -19,23 +19,38 @@ let auth_schema = mongoose.Schema(
       lowercase: true,
       unique: true,
     },
-    password: {
+    username: {
       type: String,
-      required: true,
+      required: false,
+      unique: true,
+      sparse: true,
+      trim: true,
     },
-    confirmPassword: {
+    password: {
       type: String,
       required: true,
     },
     role: {
       type: String,
       required: false,
-      default: "user",
+      enum: ["employee", "manager", "admin", "hr", "user"],
+      default: "employee",
+    },
+    employeeId: {
+      type: String,
+      required: false,
+      ref: "Employee",
+      sparse: true,
     },
   },
-  { collection: "auth_data" },
+  {
+    collection: "auth_data",
+    timestamps: true,
+  },
 );
 
-let auth_data = mongoose.model("auth_data", auth_schema);
+// Remove confirmPassword from being required
+// It should only be used for validation, not stored
 
+const auth_data = mongoose.model("auth_data", auth_schema);
 module.exports = auth_data;

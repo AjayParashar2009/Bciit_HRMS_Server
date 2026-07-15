@@ -1,140 +1,13 @@
-// const emp_data = require("../Model/Employee_schema");
-
-// const postEmployeeAPI = async (req, res) => {
-//   const { name, ID, phone, email, address, DOB, salary } = req.body;
-
-//   try {
-//     if (!name || !ID || !phone || !email || !address || !DOB || !salary) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "All fields are required",
-//       });
-//     }
-//     let existing_user = await emp_data.findOne({ ID: ID });
-//     if (existing_user) {
-//       return res
-//         .status(409)
-//         .json({ success: false, message: "User already exist" });
-//     }
-//     const data = await emp_data.create({
-//       name: name,
-//       ID: ID,
-//       phone: phone,
-//       email: email,
-//       address: address,
-//       DOB: DOB,
-//       salary: salary,
-//     });
-
-//     return res.status(201).json({
-//       success: true,
-//       message: "Record Created Successfully",
-//     });
-//   } catch (error) {
-//     console.error(error);
-
-//     return res.status(500).json({
-//       success: false,
-//       message: "Something went wrong",
-//     });
-//   }
-// };
-
-// let getEmployeeAPI = async (req, res) => {
-//   try {
-//     let data = await emp_data.find();
-
-//     return res.status(200).json({
-//       success: true,
-//       message: "Records fetched successfully",
-//       data,
-//     });
-//   } catch (error) {
-//     console.error(error);
-
-//     return res.status(500).json({
-//       success: false,
-//       message: "Something went wrong",
-//     });
-//   }
-// };
-
-// let updateEmployeeAPI = async (req, res) => {
-//   try {
-//     const { name, ID, phone, email, address, DOB, salary } = req.body;
-//     let existing_emp = await emp_data.findOne({ email: email });
-//     if (!existing_emp) {
-//       return res
-//         .status(404)
-//         .json({ success: false, message: "Record not found" });
-//     }
-
-//     let updateEmployee = await emp_data.updateOne(
-//       { email: email },
-//       {
-//         $set: {
-//           name: name,
-//           ID: ID,
-//           phone: phone,
-//           email: email,
-//           address: address,
-//           DOB: DOB,
-//           salary: salary,
-//         },
-//       },
-//     );
-//     return res
-//       .status(200)
-//       .json({ success: true, message: "Record update successfully" });
-//   } catch (error) {
-//     return res
-//       .status(500)
-//       .json({ success: false, message: "Something went wrong" });
-//   }
-//   console.log(req.body);
-// };
-
-// let updateEmployeeAPIbyId = async (req, res) => {
-//   let { id } = req.params;
-//   const { name, ID, phone, email, address, DOB, salary } = req.body;
-
-//   try {
-//     let update_employee = await emp_data.findByIdAndUpdate(id, {
-//       name: name,
-//       ID: ID,
-//       phone: phone,
-//       email: email,
-//       address: address,
-//       DOB: DOB,
-//       salary: salary,
-//     });
-
-//     if (!update_employee) {
-//       return res
-//         .status(404)
-//         .json({ success: false, message: "Record not found" });
-//     }
-
-//     return res
-//       .status(200)
-//       .json({ success: true, message: "Record updated successfully" });
-//   } catch (error) {
-//     return res
-//       .status(500)
-//       .json({ success: false, message: "something went wrong" });
-//   }
-// };
-// module.exports = {
-//   postEmployeeAPI,
-//   getEmployeeAPI,
-//   updateEmployeeAPI,
-//   updateEmployeeAPIbyId,
-// };
-
 const Employee = require("../Model/Employee_schema");
+const { createEmployeeAccount } = require("./Auth");
+const bcrypt = require("bcrypt");
+const dotenv = require("dotenv");
+dotenv.config();
 
-// Create Employee
+// Create Employee with optional account
 const postEmployeeAPI = async (req, res) => {
+  console.log("Received employee data:", req.body);
+  
   const {
     EmpId,
     EmpName,
@@ -146,61 +19,210 @@ const postEmployeeAPI = async (req, res) => {
     Salary,
     JoiningDate,
     Designation,
+    hasAccount,
+    accountData
   } = req.body;
 
   try {
-    if (
-      !EmpId ||
-      !EmpName ||
-      !Gender ||
-      !DOB ||
-      !Email ||
-      !ContactNumber ||
-      !EmpDepartment ||
-      !Salary ||
-      !JoiningDate ||
-      !Designation
-    ) {
+    // Validate required fields
+    const requiredFields = ['EmpId', 'EmpName', 'Gender', 'DOB', 'Email', 'ContactNumber', 'EmpDepartment', 'Salary', 'JoiningDate', 'Designation'];
+    const missingFields = requiredFields.filter(field => !req.body[field]);
+    
+    if (missingFields.length > 0) {
       return res.status(400).json({
         success: false,
-        message: "All fields are required",
+        message: `Missing required fields: ${missingFields.join(', ')}`
       });
     }
 
+    // Check for existing employee
     const existingEmployee = await Employee.findOne({
-      $or: [{ EmpId }, { Email }],
+      $or: [{ EmpId }, { Email: Email.toLowerCase() }],
     });
 
     if (existingEmployee) {
       return res.status(409).json({
         success: false,
-        message: "Employee already exists",
+        message: "Employee with this ID or Email already exists",
       });
     }
 
-    await Employee.create({
+    // Prepare employee data
+    const employeeData = {
       EmpId,
       EmpName,
       Gender,
       DOB,
-      Email,
+      Email: Email.toLowerCase(),
       ContactNumber,
       EmpDepartment,
-      Salary,
+      Salary: Number(Salary),
       JoiningDate,
       Designation,
-    });
+      hasAccount: hasAccount || false,
+      empImage: null
+    };
+
+    // If account creation is requested
+    if (hasAccount && accountData) {
+      try {
+        // Create account using the auth service
+        const account = await createEmployeeAccount({
+          EmpName,
+          Email,
+          accountData,
+          EmpId
+        });
+        employeeData.accountId = account._id;
+      } catch (accountError) {
+        return res.status(409).json({
+          success: false,
+          message: accountError.message || "Failed to create account"
+        });
+      }
+    }
+
+    // Create employee
+    const newEmployee = await Employee.create(employeeData);
 
     return res.status(201).json({
       success: true,
-      message: "Employee created successfully",
+      message: hasAccount ? 'Employee and account created successfully' : 'Employee created successfully',
+      data: newEmployee
     });
-  } catch (error) {
-    console.log(error);
 
+  } catch (error) {
+    console.error("Error creating employee:", error);
     return res.status(500).json({
       success: false,
       message: "Something went wrong",
+      error: error.message
+    });
+  }
+};
+
+
+// Create Employee
+const postEmployeeAPI = async (req, res) => {
+  console.log("Received employee data:", req.body);
+
+  const {
+    EmpId,
+    EmpName,
+    Gender,
+    DOB,
+    Email,
+    ContactNumber,
+    EmpDepartment,
+    Salary,
+    JoiningDate,
+    Designation,
+    hasAccount,
+    accountData,
+  } = req.body;
+
+  try {
+    // Validate required fields (empImage is NOT required anymore)
+    const requiredFields = [
+      "EmpId",
+      "EmpName",
+      "Gender",
+      "DOB",
+      "Email",
+      "ContactNumber",
+      "EmpDepartment",
+      "Salary",
+      "JoiningDate",
+      "Designation",
+    ];
+    const missingFields = requiredFields.filter((field) => !req.body[field]);
+
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Missing required fields: ${missingFields.join(", ")}`,
+      });
+    }
+
+    // Check for existing employee
+    const existingEmployee = await Employee.findOne({
+      $or: [{ EmpId }, { Email: Email.toLowerCase() }],
+    });
+
+    if (existingEmployee) {
+      return res.status(409).json({
+        success: false,
+        message: "Employee with this ID or Email already exists",
+      });
+    }
+
+    // Prepare employee data
+    const employeeData = {
+      EmpId,
+      EmpName,
+      Gender,
+      DOB,
+      Email: Email.toLowerCase(),
+      ContactNumber,
+      EmpDepartment,
+      Salary: Number(Salary),
+      JoiningDate,
+      Designation,
+      hasAccount: hasAccount || false,
+      empImage: null, // Default image
+    };
+
+    // If account creation is requested
+    if (hasAccount && accountData) {
+      // Check if account already exists
+      const existingAccount = await auth_data.findOne({
+        $or: [
+          { email: Email.toLowerCase() },
+          { username: accountData.username },
+        ],
+      });
+
+      if (existingAccount) {
+        return res.status(409).json({
+          success: false,
+          message: "Account with this email or username already exists",
+        });
+      }
+
+      // Hash password
+      const hashedPassword = await bcrypt.hash(accountData.password, 10);
+
+      // Create account
+      const newAccount = new auth_data({
+        id: `ACC-${Date.now()}`,
+        name: EmpName,
+        email: Email.toLowerCase(),
+        username: accountData.username,
+        password: hashedPassword,
+        role: accountData.role || "employee",
+        employeeId: EmpId,
+      });
+
+      await newAccount.save();
+      employeeData.accountId = newAccount._id;
+    }
+
+    // Create employee
+    const newEmployee = await Employee.create(employeeData);
+
+    return res.status(201).json({
+      success: true,
+      message: hasAccount
+        ? "Employee and account created successfully"
+        : "Employee created successfully",
+      data: newEmployee,
+    });
+  } catch (error) {
+    console.error("Error creating employee:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Something went wrong",
+      error: error.message,
     });
   }
 };
@@ -208,7 +230,7 @@ const postEmployeeAPI = async (req, res) => {
 // Get All Employees
 const getEmployeeAPI = async (req, res) => {
   try {
-    const data = await Employee.find();
+    const data = await Employee.find().sort({ createdAt: -1 });
 
     return res.status(200).json({
       success: true,
@@ -216,8 +238,7 @@ const getEmployeeAPI = async (req, res) => {
       data,
     });
   } catch (error) {
-    console.log(error);
-
+    console.error("Error fetching employees:", error);
     return res.status(500).json({
       success: false,
       message: "Something went wrong",
@@ -225,10 +246,9 @@ const getEmployeeAPI = async (req, res) => {
   }
 };
 
-// Update Employee using Email
+// Update Employee using Email (with image upload)
 const updateEmployeeAPI = async (req, res) => {
-  // console.log(req.body);
-  console.log("file name is:" + req.files.empImage[0]);
+  console.log("Update employee by email:", req.body);
 
   const {
     EmpId,
@@ -245,57 +265,41 @@ const updateEmployeeAPI = async (req, res) => {
 
   try {
     const employee = await Employee.findOne({ Email });
-    console.log(employee.empImage);
 
     if (!employee) {
       return res.status(404).json({
         success: false,
         message: "Employee not found",
-        empImage
       });
     }
 
-    if (req.files?.empImage) {
-      const empImage = req.files.empImage[0].filename;
+    // Prepare update data
+    const updateData = {
+      EmpId,
+      EmpName,
+      Gender,
+      DOB,
+      Email: Email.toLowerCase(),
+      ContactNumber,
+      EmpDepartment,
+      Salary: Number(Salary),
+      JoiningDate,
+      Designation,
+    };
 
-      await Employee.updateOne(
-        { Email },
-        {
-          $set: {
-            empImage,
-          },
-        },
-      );
-      return res
-        .status(200)
-        .json({ success: true, message: "Profile image update successfully" });
+    // If image is uploaded
+    if (req.files?.empImage) {
+      updateData.empImage = req.files.empImage[0].filename;
     }
 
-    await Employee.updateOne(
-      { Email: Email },
-      {
-        $set: {
-          EmpId,
-          EmpName,
-          Gender,
-          DOB,
-          Email,
-          ContactNumber,
-          EmpDepartment,
-          Salary,
-          JoiningDate,
-          Designation,
-        },
-      },
-    );
+    await Employee.updateOne({ Email }, { $set: updateData });
 
     return res.status(200).json({
       success: true,
       message: "Employee updated successfully",
     });
   } catch (error) {
-    console.log(error);
-
+    console.error("Error updating employee:", error);
     return res.status(500).json({
       success: false,
       message: "Something went wrong",
@@ -305,8 +309,10 @@ const updateEmployeeAPI = async (req, res) => {
 
 // Update Employee by MongoDB _id
 const updateEmployeeAPIbyId = async (req, res) => {
-  const { id } = req.params;
+  console.log("Updating employee with ID:", req.params.id);
+  console.log("Update data:", req.body);
 
+  const { id } = req.params;
   const {
     EmpId,
     EmpName,
@@ -321,6 +327,16 @@ const updateEmployeeAPIbyId = async (req, res) => {
   } = req.body;
 
   try {
+    // Check if employee exists
+    const existingEmployee = await Employee.findById(id);
+    if (!existingEmployee) {
+      return res.status(404).json({
+        success: false,
+        message: "Employee not found",
+      });
+    }
+
+    // Update employee
     const updatedEmployee = await Employee.findByIdAndUpdate(
       id,
       {
@@ -328,17 +344,70 @@ const updateEmployeeAPIbyId = async (req, res) => {
         EmpName,
         Gender,
         DOB,
-        Email,
+        Email: Email?.toLowerCase(),
         ContactNumber,
         EmpDepartment,
-        Salary,
+        Salary: Number(Salary),
         JoiningDate,
         Designation,
       },
-      { new: true },
+      { new: true, runValidators: true },
     );
 
-    if (!updatedEmployee) {
+    return res.status(200).json({
+      success: true,
+      message: "Employee updated successfully",
+      data: updatedEmployee,
+    });
+  } catch (error) {
+    console.error("Error updating employee:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Something went wrong",
+      error: error.message,
+    });
+  }
+};
+
+// Delete Employee
+const deleteEmployeeAPI = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const employee = await Employee.findByIdAndDelete(id);
+
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: "Employee not found",
+      });
+    }
+
+    // Also delete associated account if exists
+    if (employee.accountId) {
+      await auth_data.findByIdAndDelete(employee.accountId);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Employee deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting employee:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Something went wrong",
+    });
+  }
+};
+
+// Get Employee by ID
+const getEmployeeById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const employee = await Employee.findById(id);
+
+    if (!employee) {
       return res.status(404).json({
         success: false,
         message: "Employee not found",
@@ -347,12 +416,10 @@ const updateEmployeeAPIbyId = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Employee updated successfully",
-      data: updatedEmployee,
+      data: employee,
     });
   } catch (error) {
-    console.log(error);
-
+    console.error("Error fetching employee:", error);
     return res.status(500).json({
       success: false,
       message: "Something went wrong",
@@ -360,28 +427,10 @@ const updateEmployeeAPIbyId = async (req, res) => {
   }
 };
 
-const deleteEmployeeAPI = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const result = await Employee.findByIdAndDelete(id);
-    if (result) {
-      return res
-        .status(200)
-        .json({ success: true, message: "Record delete successfully" });
-    }
-    return res
-      .status(404)
-      .json({ success: false, message: "Record not found" });
-  } catch (error) {
-    return res
-      .status(500)
-      .json({ success: false, message: "Something went wrong" });
-  }
-};
-
 module.exports = {
   postEmployeeAPI,
   getEmployeeAPI,
+  getEmployeeById,
   updateEmployeeAPI,
   updateEmployeeAPIbyId,
   deleteEmployeeAPI,
